@@ -1,8 +1,16 @@
 // ROI
-var counties = ee.FeatureCollection("TIGER/2018/Counties");
-var californiaCounties = counties.filter(ee.Filter.eq('STATEFP', '06'));
-var targetCountyNames = ['Colusa'];
-var roi = californiaCounties.filter(ee.Filter.inList('NAME', targetCountyNames));
+var roi = ee.FeatureCollection([
+  ee.Feature(
+    ee.Geometry.Polygon([
+      [-122.20293954791607, 39.280684028533145],
+      [-122.19148115100445, 39.280684028533145],
+      [-122.19148115100445, 39.2890048388685],
+      [-122.20293954791607, 39.2890048388685],
+      [-122.20293954791607, 39.280684028533145]
+    ]),
+    {}  // Empty properties
+  )
+]);
 
 // Function to clip images by the ROI
 function clipImage(image) {
