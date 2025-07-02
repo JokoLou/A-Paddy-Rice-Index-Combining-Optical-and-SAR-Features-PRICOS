@@ -1,41 +1,42 @@
-# A-Paddy-Rice-Index-Combining-Optical-and-SAR-Features-PRICOS
+# A Robust Paddy Rice Index Combining Optical and SAR Features — PRICOS
 
-This project provides code for calculating the Paddy Rice Index (PRICOS) by integrating optical and SAR time-series features. It supports both JavaScript and Python to accommodate users from different backgrounds.
+This project provides code for calculating the Paddy Rice Index (PRICOS), which integrates optical and synthetic aperture radar (SAR) time-series features. The method supports both JavaScript and Python implementations, making it accessible to users from various backgrounds.
 
 ---
+
 ## Data Requirements
 
-The algorithm requires five satellite image time series as inputs:
+The algorithm requires the following five satellite image time series as inputs (recommended variable names in parentheses):
 
-1. Sentinel-2 NDVI during the paddy rice transplanting stage  
-2. Sentinel-2 NDVI from tillering to maturity stages  
-3. Sentinel-2 MNDWI during the transplanting stage  
-4. Sentinel-1 VH during the transplanting stage  
-5. Sentinel-1 VH from tillering to maturity stages  
+1. Sentinel-2 NDVI during the paddy rice transplanting stage (`NDVI_FT`)  
+2. Sentinel-2 NDVI from the tillering to maturity stages (`NDVI_TM`)  
+3. Sentinel-2 MNDWI during the transplanting stage (`MNDWI_FT`)  
+4. Sentinel-1 VH polarization during the transplanting stage (`VH_FT`)  
+5. Sentinel-1 VH polarization from the tillering to maturity stages (`VH_TM`)  
 
-All satellite data are open-access via Google Earth Engine (GEE).
-
----
-## Usage
-
-Please read the instructions before using the code.  
-
-1. Clone this repository.  
-2. Prepare your GEE credentials (for Python) or open the JavaScript notebook in GEE.  
-3. Replace the sample paths with your own asset IDs.  
-4. Run the script and inspect outputs in the console or export maps to your assets.
+All satellite data are publicly available through Google Earth Engine (GEE).
 
 ---
 
-## Phenological Stages
+## Usage Instructions
 
-Paddy rice growth stages can be determined using:
+Please read the following notes carefully before using the code:
 
-- A small number of ground-truth sample points  
-- Existing regional cropping calendars  
+- A complete example script is provided for JavaScript users. The script can be run directly in the GEE Code Editor without any additional data preparation. (For large-scale applications, to improve computational efficiency, we recommend using a fixed value for the difference in day-of-year between VH maximum and minimum: 90 for plains, and 60 for mountainous regions.)  
+- For Python users, please prepare the required datasets according to the "Data Requirements" section before running the script.
+
+---
+
+## Phenological Stage Definition
+
+Paddy rice growth stages can be identified using:
+
+- A small number of ground-truth samples  
+- Regional crop calendars
 
 ---
 
 ## Citation
 
-If you use PRICOS in your research, please cite: Lou, Y., Yang, G., Sun, W., Huang, K., Huang, J., Wang, L., & Liu, W. (2025).PRICOS: A Robust Paddy Rice Index Combining Optical and Synthetic Aperture Radar Features for Improved Mapping Efficiency.Remote Remote Sensing, 17(692). https://doi.org/10.3390/rs17040692
+If you use the PRICOS method in your research, please cite:
+Lou, Y., Yang, G., Sun, W., Huang, K., Huang, J., Wang, L., & Liu, W. (2025). PRICOS: A Robust Paddy Rice Index Combining Optical and Synthetic Aperture Radar Features for Improved Mapping Efficiency.Remote Sensing, 17(692). https://doi.org/10.3390/rs17040692
