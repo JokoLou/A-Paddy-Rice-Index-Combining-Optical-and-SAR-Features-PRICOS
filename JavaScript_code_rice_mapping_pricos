@@ -1,16 +1,8 @@
-// Define region of interest (ROI) as a FeatureCollection with a polygon
-var roi = ee.FeatureCollection([
-  ee.Feature(
-    ee.Geometry.Polygon([
-      [-122.20293954791607, 39.280684028533145],
-      [-122.19148115100445, 39.280684028533145],
-      [-122.19148115100445, 39.2890048388685],
-      [-122.20293954791607, 39.2890048388685],
-      [-122.20293954791607, 39.280684028533145]
-    ]),
-    {}  // Empty properties
-  )
-]);
+// ROI
+var counties = ee.FeatureCollection("TIGER/2018/Counties");
+var californiaCounties = counties.filter(ee.Filter.eq('STATEFP', '06'));
+var targetCountyNames = ['Colusa'];
+var roi = californiaCounties.filter(ee.Filter.inList('NAME', targetCountyNames));
 
 // Function to clip images by the ROI
 function clipImage(image) {
@@ -101,7 +93,7 @@ var p3 = fittedCombined.filter(ee.Filter.calendarRange(120, 150, 'day_of_year'))
 var one = ee.Image.constant(1);
 var f1 = one.subtract(p1.pow(2));
 var f2 = one.subtract(one.subtract(p2).pow(2));
-var f3 = p3.add(1).min(1);
+var f3 = p3.add(1).min(1).updateMask(p3.add(1).min(1).gte(0.9));
 
 // Load Sentinel-1 VH polarization GRD data, filter and clip by ROI
 var sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')
@@ -214,6 +206,6 @@ var mapViz = {
 Map.addLayer(rice.updateMask(rice.neq(0)), mapViz, "Rice");
 
 // Center map on ROI and add styled boundary
-Map.centerObject(roi, 16);
+Map.centerObject(roi, 10);
 var roiStyled = roi.style({color: 'red', fillColor: '00000000', width: 2});
 Map.addLayer(roiStyled, {}, 'ROI Boundary');
