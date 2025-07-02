@@ -12,9 +12,10 @@ The algorithm requires the following five satellite image time series as inputs 
 2. Sentinel-2 NDVI from the tillering to maturity stages (`NDVI_TM`)  
 3. Sentinel-2 MNDWI during the transplanting stage (`MNDWI_FT`)  
 4. Sentinel-1 VH polarization during the transplanting stage (`VH_FT`)  
-5. Sentinel-1 VH polarization from the tillering to maturity stages (`VH_TM`)  
+5. Sentinel-1 VH polarization from the tillering to maturity stages (`VH_TM`)
+6. The difference in day-of-year (DOY) between the maximum VH polarization value during the tillering to maturity stages and the minimum VH polarization value during the transplanting stage, derived from Sentinel-1 data (`l`)
 
-All satellite data are publicly available through Google Earth Engine (GEE).
+All input data can be processed and downloaded using Google Earth Engine (GEE).
 
 ---
 
