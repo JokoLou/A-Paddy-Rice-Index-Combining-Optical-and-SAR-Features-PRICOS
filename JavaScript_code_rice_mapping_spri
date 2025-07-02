@@ -1,0 +1,219 @@
+// Define region of interest (ROI) as a FeatureCollection with a polygon
+var roi = ee.FeatureCollection([
+  ee.Feature(
+    ee.Geometry.Polygon([
+      [-122.20293954791607, 39.280684028533145],
+      [-122.19148115100445, 39.280684028533145],
+      [-122.19148115100445, 39.2890048388685],
+      [-122.20293954791607, 39.2890048388685],
+      [-122.20293954791607, 39.280684028533145]
+    ]),
+    {}  // Empty properties
+  )
+]);
+
+// Function to clip images by the ROI
+function clipImage(image) {
+  return image.clip(roi);
+}
+
+// Define analysis time window
+var start = '2019-04-10';
+var end = '2019-09-10';
+
+// Load Sentinel-2 Harmonized image collection, filter by ROI and date
+var s2 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterBounds(roi)
+  .filterDate(start, end)
+  // Link cloud score collections for masking
+  .linkCollection(ee.ImageCollection('GOOGLE/CLOUD_SCORE_PLUS/V1/S2_HARMONIZED'), ['cs_cdf'])
+  .linkCollection(ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY'), ['probability'])
+  .map(clipImage)
+  // Mask pixels with cloud score below 0.5
+  .map(function(img) {
+    return img.updateMask(img.select('cs_cdf').gte(0.5));
+  });
+
+// Harmonic frequencies for time series fitting (1 to 3)
+var harmonicFrequencies = ee.List.sequence(1, 3);
+
+// Helper function to create band names with prefix and indices
+var makeNames = function(prefix, list) {
+  return ee.List(list).map(function(i) {
+    return ee.String(prefix).cat(ee.Number(i).int());
+  });
+};
+
+// Define band names for harmonic terms
+var cosNames = makeNames('cos_', harmonicFrequencies);
+var sinNames = makeNames('sin_', harmonicFrequencies);
+var harmonicNames = ee.List(['constant', 't']).cat(cosNames).cat(sinNames);
+
+// Add spectral indices and harmonic features to images
+function addFeatures(image) {
+  var ndvi = image.normalizedDifference(['B8', 'B4']).rename('NDVI');
+  var mndwi = image.normalizedDifference(['B3', 'B11']).rename('MNDWI');
+  var yearFrac = image.date().difference('1970-01-01', 'year');
+  var t = ee.Image.constant(yearFrac.multiply(2 * Math.PI)).rename('t');
+  var constant = ee.Image.constant(1);
+  var base = image.addBands([ndvi, mndwi, constant, t.float()]);
+  var time = base.select('t');
+  var cosTerms = time.multiply(ee.Image.constant(harmonicFrequencies)).cos().rename(cosNames);
+  var sinTerms = time.multiply(ee.Image.constant(harmonicFrequencies)).sin().rename(sinNames);
+  return base.addBands(cosTerms).addBands(sinTerms);
+}
+
+var harmonicS2 = s2.map(addFeatures);
+
+// Perform harmonic regression and return fitted time series for specified index
+function harmonicFittedSeries(indexName) {
+  var regression = harmonicS2
+    .select(harmonicNames.add(indexName))
+    .reduce(ee.Reducer.linearRegression(harmonicNames.length(), 1));
+  var coefficients = regression.select('coefficients')
+    .arrayProject([0])
+    .arrayFlatten([harmonicNames]);
+  return harmonicS2.map(function(image) {
+    var fitted = image.select(harmonicNames)
+      .multiply(coefficients)
+      .reduce('sum')
+      .rename(indexName + 'fitted');
+    return image.addBands(fitted).select([indexName + 'fitted']);
+  });
+}
+
+var ndviFitted = harmonicFittedSeries('NDVI');
+var mndwiFitted = harmonicFittedSeries('MNDWI');
+
+// Combine NDVI and MNDWI fitted images by matching timestamps
+var fittedCombined = ndviFitted.map(function(ndviImg) {
+  var time = ndviImg.get('system:time_start');
+  var mndwiImg = mndwiFitted.filter(ee.Filter.eq('system:time_start', time)).first();
+  return ndviImg.addBands(mndwiImg).select(['NDVIfitted', 'MNDWIfitted']);
+});
+
+// Extract phenological parameters using calendar day filters
+var p1 = fittedCombined.filter(ee.Filter.calendarRange(120, 150, 'day_of_year')).select('NDVIfitted').min();
+var p2 = fittedCombined.filter(ee.Filter.calendarRange(150, 250, 'day_of_year')).select('NDVIfitted').max();
+var p3 = fittedCombined.filter(ee.Filter.calendarRange(120, 150, 'day_of_year')).select('MNDWIfitted').max();
+
+// Define constants for further calculations
+var one = ee.Image.constant(1);
+var f1 = one.subtract(p1.pow(2));
+var f2 = one.subtract(one.subtract(p2).pow(2));
+var f3 = p3.add(1).min(1);
+
+// Load Sentinel-1 VH polarization GRD data, filter and clip by ROI
+var sentinel1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(roi)
+  .filterDate(start, end)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .filterMetadata('orbitProperties_pass', 'equals', 'DESCENDING')
+  .select('VH')  
+  .map(clipImage);
+
+// Apply speckle filtering to Sentinel-1 images
+function Filter(image) {
+  var size = 7;
+  var mean = image.reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: ee.Kernel.square(size)
+  });
+  var variance = image.reduceNeighborhood({
+    reducer: ee.Reducer.variance(),
+    kernel: ee.Kernel.square(size)
+  });
+  var snr = variance.divide(mean.multiply(mean));
+  var filtered = mean.updateMask(snr.lt(1.0))
+                    .convolve(ee.Kernel.gaussian(2.0));
+  filtered = filtered.rename('VH')
+    .reproject({
+      crs: image.select(0).projection(),
+      scale: image.select(0).projection().nominalScale()
+    })
+    .clip(image.geometry());
+  return filtered.copyProperties(image, ['system:time_start']);
+}
+
+// Add day-of-year (DOY) band to Sentinel-1 images
+function addDOY(image) {
+  var doy = ee.Date(image.get('system:time_start')).getRelative('day', 'year');
+  var doyBand = ee.Image.constant(doy)
+    .rename('doy')
+    .toShort()
+    .reproject({
+      crs: image.select(0).projection(),
+      scale: image.select(0).projection().nominalScale()
+    })
+    .clip(image.geometry());
+  return image.addBands(doyBand);
+}
+
+var filteredImages = sentinel1.map(Filter).map(addDOY);
+
+// Calculate VH max and min values during specific DOY ranges
+var maxVH = filteredImages.select('VH')
+  .filter(ee.Filter.calendarRange(170, 250, 'day_of_year'))
+  .reduce(ee.Reducer.max())
+  .rename('maxVH');
+
+var minVH = filteredImages.select('VH')
+  .filter(ee.Filter.calendarRange(120, 170, 'day_of_year'))
+  .reduce(ee.Reducer.min())
+  .rename('minVH');
+
+// Extract DOY corresponding to max VH values
+var maxDOYCollection = filteredImages.map(function(image) {
+  var mask = image.select('VH').eq(maxVH.select('maxVH'));
+  return image.select('doy').updateMask(mask);
+});
+var maxDOY = maxDOYCollection.reduce(ee.Reducer.min()).rename('maxDOY'); 
+
+// Extract DOY corresponding to min VH values
+var minDOYCollection = filteredImages.map(function(image) {
+  var mask = image.select('VH').eq(minVH.select('minVH'));
+  return image.select('doy').updateMask(mask);
+});
+var minDOY = minDOYCollection.reduce(ee.Reducer.min()).rename('minDOY');
+
+// Calculate difference between max and min VH DOYs
+var l = maxDOY.subtract(minDOY).rename('doy_diff');
+
+// Calculate VH difference rate normalized by DOY difference (scaled by 30)
+var p4 = filteredImages.select('VH')
+  .filter(ee.Filter.calendarRange(120, 170, 'day_of_year'))
+  .min();
+
+var p5 = filteredImages.select('VH')
+  .filter(ee.Filter.calendarRange(170, 250, 'day_of_year'))
+  .max();
+
+var vh_diff = (p5.subtract(p4)).divide(l.divide(30));
+
+// Calculate angle alpha in degrees and normalize
+var alphaRadians = vh_diff.atan();
+var alphaDegrees = alphaRadians.multiply(180).divide(Math.PI);
+var fh = alphaDegrees.divide(ee.Image.constant(90));
+
+// Calculate PRICOS index by multiplying factors
+var pricos = f1.multiply(f2).multiply(f3).multiply(fh);
+
+// Threshold PRICOS index for rice classification
+var rice = pricos.gte(0.6);
+
+// Visualization parameters
+var mapViz = {
+  min: 0,
+  max: 1,
+  scale: 10,
+  palette: ["black", "green"]
+};
+
+// Add rice layer to map with mask
+Map.addLayer(rice.updateMask(rice.neq(0)), mapViz, "Rice");
+
+// Center map on ROI and add styled boundary
+Map.centerObject(roi, 16);
+var roiStyled = roi.style({color: 'red', fillColor: '00000000', width: 2});
+Map.addLayer(roiStyled, {}, 'ROI Boundary');
