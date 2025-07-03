@@ -214,6 +214,6 @@ var mapViz = {
 Map.addLayer(rice.updateMask(rice.neq(0)), mapViz, "Rice");
 
 // Center map on ROI and add styled boundary
-Map.centerObject(roi, 10);
+Map.centerObject(roi, 15);
 var roiStyled = roi.style({color: 'red', fillColor: '00000000', width: 2});
 Map.addLayer(roiStyled, {}, 'ROI Boundary');
