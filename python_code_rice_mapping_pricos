@@ -1,1 +1,148 @@
+import os
+import numpy as np
+import rasterio
+from rasterio.transform import from_origin
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
+# === Define paths ===
+data_dir       = r"E:\Colusa"
+ndvi_ft_path   = os.path.join(data_dir, "NDVI_FT.tif")
+ndvi_tm_path   = os.path.join(data_dir, "NDVI_TM.tif")
+mndwi_ft_path  = os.path.join(data_dir, "MNDWI_FT.tif")
+vh_ft_path     = os.path.join(data_dir, "VH_FT.tif")
+vh_tm_path     = os.path.join(data_dir, "VH_TM.tif")
+l_path         = os.path.join(data_dir, "l.tif")
+
+def load_masked(path, multiband=False):
+    with rasterio.open(path) as src:
+        if multiband:
+            arr = src.read(masked=True).astype(np.float32)
+            data = np.where(arr.mask, np.nan, arr.data)
+        else:
+            arr = src.read(1, masked=True).astype(np.float32)
+            data = np.where(arr.mask, np.nan, arr.data)
+        profile = src.profile
+    return data, profile
+
+# === Verify that all rasters share the same CRS, transform, and size ===
+paths = [ndvi_ft_path, ndvi_tm_path, mndwi_ft_path, vh_ft_path, vh_tm_path, l_path]
+profiles = []
+for p in paths:
+    with rasterio.open(p) as src:
+        profiles.append(src.profile)
+
+assert all(pr['crs'] == profiles[0]['crs'] for pr in profiles), "CRS mismatch"
+assert all(pr['transform'] == profiles[0]['transform'] for pr in profiles), "Transform mismatch"
+assert all(pr['width'] == profiles[0]['width'] and pr['height'] == profiles[0]['height']
+           for pr in profiles), "Raster size mismatch"
+
+# === Load datasets ===
+ndvi_ft, _  = load_masked(ndvi_ft_path, multiband=True)
+ndvi_tm, _  = load_masked(ndvi_tm_path, multiband=True)
+mndwi_ft, _ = load_masked(mndwi_ft_path, multiband=True)
+vh_ft, _    = load_masked(vh_ft_path, multiband=True)
+vh_tm, _    = load_masked(vh_tm_path, multiband=True)
+l, _        = load_masked(l_path, multiband=False)
+
+# === Compute features ===
+p1 = np.nanmin(ndvi_ft, axis=0)
+p2 = np.nanmax(ndvi_tm, axis=0)
+p3 = np.nanmax(mndwi_ft, axis=0)
+p4 = np.nanmin(vh_ft, axis=0)
+p5 = np.nanmax(vh_tm, axis=0)
+
+f1 = 1.0 - np.power(p1, 2)
+f2 = 1.0 - np.power(1.0 - p2, 2)
+f3 = (p3 >= 0).astype(np.float32)
+
+vh_diff = (p5 - p4) / (l / 30.0)
+alpha   = np.degrees(np.arctan(vh_diff))
+fh      = alpha / 90.0
+
+# === Compute PRICOS and rice mask ===
+pricos    = f1 * f2 * f3 * fh
+rice_mask = (pricos >= 0.6) & (~np.isnan(pricos))
+
+# === Save rice mask to GeoTIFF ===
+output_path = os.path.join(data_dir, "rice_mask.tif")
+profile = profiles[0].copy()
+profile.update(
+    dtype=rasterio.float32,
+    count=1,
+    compress='lzw',
+    nodata=None
+)
+with rasterio.open(output_path, 'w', **profile) as dst:
+    dst.write(rice_mask.astype(np.float32), 1)
+
+print(f"Rice mask GeoTIFF saved to: {output_path}")
+
+# === Plot rice classification with lat/lon and legend ===
+with rasterio.open(output_path) as src:
+    rice_mask = src.read(1)
+    transform = src.transform
+    crs = src.crs
+    height, width = src.height, src.width
+
+# Classification: 0 = Non-Rice, 1 = Rice
+class_labels = {0: 'Non-Rice', 1: 'Rice'}
+class_colors = {0: '#f0f0f0', 1: '#1a9641'}  # gray and green
+
+cmap = mcolors.ListedColormap([class_colors[0], class_colors[1]])
+bounds = [-0.5, 0.5, 1.5]
+norm = mcolors.BoundaryNorm(bounds, cmap.N)
+
+left, top = transform * (0, 0)
+right, bottom = transform * (width, height)
+extent = (left, right, bottom, top)
+
+fig, ax = plt.subplots(figsize=(10, 8),
+                       subplot_kw={'projection': ccrs.PlateCarree()})
+
+im = ax.imshow(rice_mask.astype(np.uint8),
+               cmap=cmap,
+               norm=norm,
+               extent=extent,
+               origin='upper',
+               transform=ccrs.PlateCarree())
+
+gl = ax.gridlines(draw_labels=True, dms=True, x_inline=False, y_inline=False)
+gl.top_labels = False
+gl.right_labels = False
+
+ax.add_feature(cfeature.BORDERS, linestyle=':')
+ax.add_feature(cfeature.COASTLINE)
+
+legend_handles = [
+    mpatches.Patch(color=class_colors[i], label=class_labels[i])
+    for i in sorted(class_labels)
+]
+ax.legend(handles=legend_handles, loc='lower right', fontsize=10, title='Class')
+
+ax.set_title("Rice Classification Map (0=Non-Rice, 1=Rice)", fontsize=14)
+plt.tight_layout()
+plt.show()
+
+# --- Save rice_mask as a GeoTIFF file ---
+output_path = os.path.join(data_dir, "rice_mask.tif")
+
+# Copy the profile from the first raster as a reference
+profile = profiles[0].copy()
+
+# Update profile for single-band, float32 output with LZW compression
+profile.update(
+    dtype=rasterio.float32,
+    count=1,
+    compress='lzw',
+    nodata=None
+)
+
+with rasterio.open(output_path, 'w', **profile) as dst:
+    dst.write(rice_mask.astype(np.float32), 1)
+
+print(f"Rice mask GeoTIFF saved to: {output_path}")
