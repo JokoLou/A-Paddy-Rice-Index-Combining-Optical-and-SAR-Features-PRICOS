@@ -6,7 +6,7 @@ This project provides code for calculating the Paddy Rice Index (PRICOS), which 
 
 ## Data Requirements
 
-The algorithm requires the following five satellite image time series as inputs (recommended variable names in parentheses):
+The algorithm requires the following six satellite image time series as inputs (recommended variable names in parentheses):
 
 1. Sentinel-2 NDVI during the paddy rice transplanting stage (`NDVI_FT`)  
 2. Sentinel-2 NDVI from the tillering to maturity stages (`NDVI_TM`)  
